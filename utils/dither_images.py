@@ -10,6 +10,8 @@ import shutil
 from PIL import Image
 import logging
 from dotenv import load_dotenv
+from PIL import ImageOps
+from PIL import ImageEnhance
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -48,6 +50,12 @@ parser = argparse.ArgumentParser(
     These are stored in the same folder as the images in a folder called "dithers".
     """
 )
+
+# parser.add_argument(
+#     '-i', '--invert',
+#     action='store_true',
+#     help='Invert images before dithering'
+# )
 
 parser.add_argument(
     '-d', '--directory', help="Set the directory to traverse", default="." 
@@ -116,7 +124,7 @@ def colorize(source_image, category):
     return color
 
 
-def dither_image(source_image, output_image, category ='grayscale'):
+def dither_image(source_image, output_image, category ='grayscale', invert=False):
     #see hitherdither docs for different dithering algos and settings
 
     if args.colorize:
@@ -126,6 +134,10 @@ def dither_image(source_image, output_image, category ='grayscale'):
 
     try:
         img= Image.open(source_image).convert('RGB')
+        if invert:
+            img = ImageOps.invert(img)
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(2)
         img.thumbnail((800,800), Image.LANCZOS)
         #palette = palettes[category]
         threshold = [96, 96, 96]
@@ -164,52 +176,84 @@ def parse_front_matter(md):
 
 prev_root = None
 
-if args.remove:
-    delete_dithers(
-        os.path.abspath(content_dir)
-        )
-else:
-    for root, dirs, files in os.walk(os.path.abspath(content_dir), topdown=True):
-        logging.debug("Checking next folder {}".format(root))
-
-        dirs[:] = [d for d in dirs if d not in exclude_dirs]
-
-        category = None
-        if prev_root is None:
-            prev_root = root
-
-        if prev_root is not root:
-            if files:
-                if any(x.endswith(tuple(image_ext)) for x in files):
-                    if not os.path.exists(os.path.join(root,'dithers')):
-                        os.mkdir(os.path.join(root,'dithers'))
-                        logging.info("📁 created in {}".format(root))
-
-        if args.colorize:
-            #iterate over md files to find one with a category
-            if not category:
-                for i in os.listdir(root):
-                    if i.startswith('index'):
-                        category2 = parse_front_matter(os.path.join(root,i))
-                        
-                        break
+# Store all dither directories created for final report
+dither_directories = set()
 
 
-        for fname in files:
-            if fname.endswith(tuple(image_ext)):
-                    file_, ext = os.path.splitext(fname)
-                    source_image= os.path.join(root,fname)
-                    output_image = os.path.join(os.path.join(root, 'dithers'), file_+'_dithered.png')
+for root, dirs, files in os.walk(os.path.abspath(content_dir), topdown=True):
+    logging.debug("Checking next folder {}".format(root))
+    print("Checking next folder {}".format(root))
+
+    dirs[:] = [d for d in dirs if d not in exclude_dirs]
+
+    category = None
+    if prev_root is None:
+        prev_root = root
+
+    if prev_root is not root:
+        if files:
+            if any(x.endswith(tuple(image_ext)) for x in files):
+                if not os.path.exists(os.path.join(root,'dithers')):
+                    os.mkdir(os.path.join(root,'dithers'))
+                    dither_directories.add(os.path.join(root,'dithers'))
+                    logging.info("📁 created in {}".format(root))
+                else:
+                    dither_directories.add(os.path.join(root,'dithers'))
+                    logging.debug("📁 already exists in {}".format(root))
+            else: 
+                logging.debug("No images in {}".format(root))
+                print("No images in {}".format(root))
+        else:
+            logging.debug("No files in {}".format(root))
+            print("No files in {}".format(root))
+    else:
+        logging.debug("Same folder as before")
+        print("Same folder as before")
+        print(prev_root)
+
+    if args.colorize:
+        #iterate over md files to find one with a category
+        if not category:
+            for i in os.listdir(root):
+                if i.startswith('index'):
+                    category2 = parse_front_matter(os.path.join(root,i))
+                    
+                    break
+
+
+    for fname in files:
+        if fname.endswith(tuple(image_ext)):
+                # print(root)
+                file_, ext = os.path.splitext(fname)
+                source_image= os.path.join(root,fname)
+
+                for inverted in [False, True]:
+                    if inverted:
+                        inverted_dir = os.path.join(root, 'dithers', 'inverted')
+                        if not os.path.exists(inverted_dir):
+                            os.makedirs(inverted_dir, exist_ok=True)
+                        output_image = os.path.join(inverted_dir, file_+'.png')
+                    else:
+                        output_image = os.path.join(root, 'dithers', file_+'.png')
                     # if not os.path.exists(output_image): // Removed in order to allow colour change on compile
                     if not args.colorize:
                         category2 = "grayscale"
-                    dither_image(source_image,output_image, category2)
+                    dither_image(source_image,output_image, category2, invert=inverted)
                     logging.info("🖼 converted {}".format(fname))
                     logging.debug(output_image)
                     # else:
                     #     logging.debug("Dithered version of {} found, skipping".format(fname))
 
-        prev_root = root
+    prev_root = root
 
 
 logging.info("Done dithering")
+
+# Add clear output about where to find the images
+if dither_directories:
+    print("\n=== Dithered images were saved to the following directories: ===")
+    for directory in sorted(dither_directories):
+        print(f"  📂 {directory}")
+    print("\nUse 'open' command to view them directly: open [directory]")
+else:
+    print("\n⚠️ No dithered images were created. Make sure your input directory contains supported images.")

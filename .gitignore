@@ -2,5 +2,6 @@ node_modules/
 .cache/
 .venv/
 public/
+src/content/*
 # Ignore all files and directories containing "dither" in the path
-**/*dither*
+# **/*dither*
